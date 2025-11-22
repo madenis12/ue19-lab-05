@@ -1,21 +1,43 @@
-name: Build and Publish Docker Image
+name: Build, Scan and Publish
 
 on:
   push:
     branches: ['main']
 
 jobs:
-  build-and-push:
+  build-scan-push:
     runs-on: ubuntu-latest
-    # Permissions nécessaires pour écrire dans le registre de paquets
     permissions:
       contents: read
       packages: write
+      security-events: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 1. Construire l'image LOCALEMENT pour que Trivy puisse la lire
+      - name: Build local image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true  # Charge l'image dans le Docker local
+          tags: local-image:test
+
+      # 2. Scanner l'image avec Trivy
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'local-image:test'
+          format: 'table'
+          # exit-code: '1' fera échouer le job si des failles sont trouvées. 
+          # Pour l'exercice, on met '0' pour que ça passe au vert même s'il trouve un petit truc.
+          exit-code: '0' 
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      # 3. Se connecter au registre
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -23,6 +45,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 4. Pousser l'image officielle (utilise le cache de l'étape 1)
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
